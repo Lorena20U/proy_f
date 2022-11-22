@@ -1,0 +1,368 @@
+---
+title: "Proyecto Flexdashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+library(flexdashboard)
+library(readr)
+library(dplyr)
+library(formattable)
+library(ggplot2)
+library(lubridate)
+library(rgdal)
+library(DT)
+library(tm)
+library(usmap)
+library(ggrepel)
+library(NLP)
+library(tm)
+library(RColorBrewer)
+library(wordcloud)
+library(highcharter)
+library(plotly)
+library(stringr)
+library(stringi)
+library(tidyverse)
+library(readxl)
+library(writexl)
+library(tidyverse)
+library(plotly)
+library(ggmap)
+library(leaflet)
+library(crosstalk)
+library(maptools)
+require(knitr)
+
+df <- read_delim("tienda.csv",
+                    ",", escape_double = FALSE, trim_ws = TRUE)
+
+df <- df %>%
+  mutate_if(is.character, utf8::utf8_encode) %>%
+  rename_all(., .funs = tolower)
+
+names(df) <- str_replace_all(names(df), " ", "_")
+
+str(df)
+names(df)
+df2 <- df
+df <- df %>% separate(order_date, into = c("ord_day", "ord_month", "ord_year"), sep = "/")
+df$ord_day <- as.integer(df$ord_day)
+df$ord_month <- as.integer(df$ord_month)
+df$ord_year <- as.integer(df$ord_year)
+
+
+```
+
+
+```{r}
+selectedData <- reactive({
+  data <- brushedPoints(df, input$plot1_brush)
+  if (nrow(data) == 0)
+    data <- df
+  data
+})
+```
+
+Dash {data-icon="fa-globe"}
+=============================
+Row {data-width=150}
+--------------------------------------
+### Total clientes 2014
+```{r}
+tot_clientes <- df %>%
+  select(customer_id, ord_year) %>%
+  group_by(ord_year) %>%
+  summarise(n = n_distinct(customer_id))
+fclientes <- comma(tot_clientes[1,1], digits = 0)
+valueBox(fclientes, tot_clientes[1,2], icon = 'fa-eye', color = "green")
+```
+
+### Total clientes 2015
+
+```{r}
+fclientes <- comma(tot_clientes[2,1], digits = 0)
+valueBox(fclientes, tot_clientes[2,2], icon = 'fa-eye', color = "orange")
+```
+
+### Total clientes 2016
+
+```{r}
+fclientes <- comma(tot_clientes[3,1], digits = 0)
+valueBox(fclientes, tot_clientes[3,2], icon = 'fa-eye', color = "coral")
+```
+
+### Total clientes 2017
+
+```{r}
+fclientes <- comma(tot_clientes[4,1], digits = 0)
+valueBox(fclientes, tot_clientes[4,2], icon = 'fa-eye', color = "gray")
+```
+
+
+Row
+----------------------------------
+
+### Movimiento por mes
+```{r}
+h1=df %>% group_by(ord_year,segment) %>% 
+  summarise(count=n())
+
+p1=plot_ly(data = h1,
+        x=h1$ord_year,
+        y=h1$count) %>% 
+  add_lines(linetype = h1$segment,
+            data = h1$count,
+            hoverinfo="text",
+            text=paste(h1$count)) %>% 
+  layout(xaxis=list(title="Year"),
+         yaxis=list(title="Count")) 
+p1
+
+```
+
+### Comportamiento
+```{r}
+#mdy(df2$order_date)
+
+df2 %>%
+  mutate(year = year(mdy(df2$order_date)),
+         month = month(mdy(df2$order_date), label = TRUE),
+         year = as.factor(year)
+         ) %>%
+  group_by(year, month) %>%
+  summarise(pedidos = n_distinct(row_id)) %>%
+  ggplot(aes(x = month,
+             y = pedidos,
+             fill = year)) + 
+  geom_col(position = "dodge")
+```
+
+
+
+Profit and Sales {data-icon="fa-sellsy"}
+==================
+
+Column {data-width=550}
+-----------------------------------------------------------------------
+
+### Sales and Profit {data-width=500}
+
+```{r}
+library(ggplot2)
+plotOutput("plot1", brush = brushOpts(id = "plot1_brush"))
+output$plot1 <- renderPlot({
+  ggplot(df, aes(sales, profit)) + geom_point()
+})
+```
+
+### Sales and discount
+
+```{r}
+renderPlot({
+  ggplot(selectedData(), aes(factor(discount), sales))  + geom_boxplot()
+})
+```
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+### Tienda Details {data-width=500}
+
+```{r}
+renderTable({
+  selectedData()
+})
+```
+
+
+
+
+
+# Mapa {data-icon='fa-map-marker-alt'}
+```{r}
+df_city <- usmap_transform(citypop)
+df_city <- df_city %>% select(lon,lat,state)
+colnames(df_city)[3] <- "state"
+
+z = merge(df_city, df, by = "state")
+
+datacross <- SharedData$new(z %>% 
+                              filter(ord_year > 1990) %>% 
+                              select(c(-ord_day)))
+```
+
+##
+### Datos {data-width=5}
+```{r}
+# slider
+filter_slider("discount", "Descuento", datacross, step = 0.5, width = 350, column = ~discount)
+#selector
+filter_select("ord_year", "Seleccione el año", datacross, group = ~ord_year, multiple = FALSE)
+```
+
+```{r}
+datacross %>%
+  DT::datatable()
+```
+
+### Mapa {data-width=7}
+```{r}
+#mapa
+datacross %>%
+  leaflet() %>%
+  addTiles() %>%
+  addMarkers(lng =~lon, lat=~lat, label=~discount)
+```
+
+
+
+
+
+```{r}
+#Data set con coordenadas por ciudad
+df_city <- usmap_transform(citypop)
+df_city <- df_city %>% select(lon,lat,state)
+colnames(df_city)[3] <- "State"
+```
+
+
+# Segemetación {data-icon='fa-chart-pie'}
+
+row
+-------------
+
+### Ventas por segmento
+
+```{r}
+#ventas segmentadas
+ventas_ganancias_segmentadas <- df %>%
+                    select(segment, sales, profit) %>%
+                    group_by(segment) %>%
+                    summarise (Ventas = sum(sales),
+                               Ganancias= sum(profit))
+```
+
+```{r}
+#Grafica en ventas
+ggplot(ventas_ganancias_segmentadas, aes(x=segment, y= format(Ventas,scientific=FALSE) , label=segment)) +
+   geom_point(stat='identity', aes(col= format(Ventas,scientific=FALSE) ), size=15)  +
+  geom_text(color="white", size=2) +
+  labs(title="Ventas por segmento", 
+       subtitle="Desde el año 2014 al 2018",
+       y = "Ventas", x = "Segmento",
+       col = "Ventas")+
+  theme(plot.title = element_text(hjust = 0.5))+ 
+  theme(plot.subtitle = element_text(hjust = 0.5))
+```
+
+### Utilidad por segmento
+
+```{r}
+ggplot(ventas_ganancias_segmentadas, aes(x=segment, y= format(Ganancias,scientific=FALSE) , label=segment)) +
+   geom_point(stat='identity', aes(col= format(Ganancias,scientific=FALSE) ), size=15)  +
+  geom_text(color="white", size=2) +
+  labs(title="Ganancias por segmento", 
+       subtitle="Desde el año 2014 al 2018",
+       y = "Ganancias", x = "Segmento",
+       col = "Ganancias")+
+  theme(plot.title = element_text(hjust = 0.5))+ 
+  theme(plot.subtitle = element_text(hjust = 0.5))
+```
+
+### Subcategorias mas demandadas
+
+```{r}
+#Subcategorias más vendidas
+frecuencia_subcategrias <- df %>%
+                    group_by(`sub-category`) %>%
+                    summarise (Frecuencias = sum(sales), .groups = 'keep')
+#Ver link para hacer la grafica
+#https://rpubs.com/arojasmor17/segmentacionretail
+#Esta en: Insights en la descripción de los productos
+#Es el mapa de las nubes de palabras
+```
+
+```{r}
+#Grafica
+set.seed(123) # Reproducibilidad
+wordcloud(frecuencia_subcategrias$`sub-category`, frecuencia_subcategrias$Frecuencias,
+          colors = brewer.pal(8, "Dark2"),
+          min.freq = 2, random.order = FALSE, rot.per = 0.20,
+          scale = c(4.0, 0.25))
+```
+
+row {.tabset }
+-------------
+
+### Top3 de los productos
+
+```{r}
+#Top 3 de produtcos con mayor ventas por categoria
+top3_categoria <- df %>%
+                    group_by(category, product_name) %>%
+                    summarise (Ventas = sum(sales), .groups = 'keep')%>%
+                    group_by(category) %>%
+                    top_n(3, Ventas)
+#Ver link para hacer la grafica
+#https://rpubs.com/arojasmor17/segmentacionretail
+#Esta en: Productos de interés dentro de cada Cluster
+```
+
+```{r}
+#Grafica
+top3_categoria %>% ggplot(aes(x = product_name, Ventas)) +
+                   geom_bar(stat = "identity", fill = "steelblue") +
+                   geom_text(aes(label = scales::comma(round(Ventas, 0))), 
+                            size = 3, 
+                            color = 'black',
+                            position = position_dodge(0.9), vjust = -0.5) +
+                   scale_y_continuous(labels = scales::comma) +
+                   labs(x = "Productos por categoria", y = "Ventas por peoducto",
+                         title = "Top 3: Ingresos por Producto y Categoria") +
+                   theme(axis.text.x = element_text(angle = 10, hjust = 1)) +
+                   facet_wrap(~category, scales = 'free_x')
+```
+
+### Distribucion de las subcategorias
+
+```{r}
+#Qué Subcategorias nos estan dando más ganancias
+subcategrias_ganancias <- df %>%
+                    group_by(`sub-category`) %>%
+                    summarise (Ganancias = sum(profit), .groups = 'keep')
+```
+
+```{r}
+ subcategrias_ganancias %>% ggplot(aes(x = `sub-category`, y = Ganancias)) +
+                            geom_bar(stat = "identity", fill = 'steelblue') +
+                            geom_text(aes(label = scales::comma(round(Ganancias, 0))), 
+                                      size = 4, 
+                                      color = 'black',
+                                      position = position_dodge(0.9), vjust = -0.5) +
+                            scale_y_continuous(labels = scales::comma) +
+                            theme(axis.text.x = element_text(angle = 90, hjust = 1))
+                            
+```
+
+### Clientes mas importantes
+
+```{r}
+#Qué clientes piden más unidades y cuanto representa en ganancias
+ganancias_personas <- df %>%
+                    group_by(customer_name) %>%
+                    summarise (Cantidad = sum(quantity),
+                               Ganancias = sum(profit)) %>%
+                    arrange(desc(Cantidad))
+ganancias_personas$customer_name <- iconv(ganancias_personas$customer_name, to = 'UTF-8')
+```
+
+```{r}
+datatable(ganancias_personas)
+```
+
